@@ -1,3 +1,5 @@
+# doc-compare
+
 ## The problem
 
 Who: people who work from paperwork that has to agree with itself, such as an
