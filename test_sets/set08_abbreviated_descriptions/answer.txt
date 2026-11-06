@@ -1,0 +1,1 @@
+consistent, no mismatches (invoice abbreviates the descriptions, part numbers, quantities and prices all agree)
