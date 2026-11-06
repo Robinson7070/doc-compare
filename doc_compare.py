@@ -1,6 +1,6 @@
-"""doc-compare v0.1: check a purchase order, invoice and delivery note against each other.
+"""doc-compare v0.2: check a purchase order, invoice and delivery note against each other.
 
-Rules only, no LLM. Works on PDFs with a text layer. Scanned PDFs are reported as unreadable (OCR comes in v0.2).
+Rules only, no LLM. Reads the PDF text layer, and falls back to OCR (Tesseract) for scanned PDFs.
 
 Usage:
     python doc_compare.py check test_sets/set02_price_mismatch
@@ -9,7 +9,16 @@ Usage:
 """
 import re, sys, json
 from pathlib import Path
+import os
 import pdfplumber
+
+try:
+    import pytesseract
+    # Windows default install location; harmless elsewhere
+    _win = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    if os.path.exists(_win): pytesseract.pytesseract.tesseract_cmd = _win
+except ImportError:
+    pytesseract = None
 
 PART = r"[A-Z]{1,4}-\d+"
 NUM = r"[\d,]+\.\d\d"
@@ -22,10 +31,23 @@ DN_LINE = re.compile(rf"^\s*({PART})\s+(.+?)\s+(\d+)\s+(\d+)\s+(\w+)\s*$")
 def money(s): return float(s.replace(",", ""))
 
 
-def read_text(pdf_path):
+def ocr_text(pdf_path):
+    """Render each page to an image and read it with Tesseract. Returns '' if OCR is not available."""
+    if pytesseract is None: return ""
+    out = []
     with pdfplumber.open(pdf_path) as pdf:
-        text = "\n".join((p.extract_text() or "") for p in pdf.pages)
-    return text.strip()
+        for p in pdf.pages:
+            img = p.to_image(resolution=300).original.convert("L")
+            out.append(pytesseract.image_to_string(img, config="--psm 6"))
+    return "\n".join(out)
+
+
+def read_text(pdf_path):
+    """Text layer first; fall back to OCR for scans."""
+    with pdfplumber.open(pdf_path) as pdf:
+        text = "\n".join((p.extract_text() or "") for p in pdf.pages).strip()
+    if len(text) >= 20: return text
+    return ocr_text(pdf_path).strip()
 
 
 def parse(pdf_path):
@@ -59,7 +81,7 @@ def check(folder):
     for pdf in sorted(Path(folder).glob("*.pdf")):
         d = parse(pdf)
         if d["kind"] in ("unreadable", "unknown"):
-            problems.append(f"{d['file']}: {d['kind']} (no text layer; needs OCR)")
+            problems.append(f"{d['file']}: {d['kind']} (no text layer and OCR found nothing)")
         else:
             docs[d["kind"]] = d
     if problems or len(docs) < 3:
